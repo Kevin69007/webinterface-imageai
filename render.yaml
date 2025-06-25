@@ -1,0 +1,83 @@
+# Configuration Render pour le déploiement
+# Fichier: render.yaml
+
+services:
+  # Service web principal
+  - type: web
+    name: ai-image-generator
+    env: python
+    region: frankfurt  # ou oregon/singapore selon votre préférence
+    plan: standard  # ou starter pour commencer
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # Installer les dépendances GPU si disponible
+      # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --max-requests 100 app:app
+    
+    # Variables d'environnement
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: false
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTORCH_CUDA_ALLOC_CONF
+        value: max_split_size_mb:512
+      - key: CUDA_VISIBLE_DEVICES
+        value: "0"
+      - key: TOKENIZERS_PARALLELISM
+        value: false
+    
+    # Disques persistants pour les modèles
+    disk:
+      name: ai-models-storage
+      mountPath: /opt/render/project/models
+      sizeGB: 50  # Ajustez selon vos besoins
+    
+    # Configuration réseau
+    healthCheckPath: /api/status
+    
+    # Auto-deploy depuis Git
+    autoDeploy: true
+
+# Configuration alternative pour un service background/worker
+  - type: background
+    name: ai-image-worker
+    env: python
+    region: frankfurt
+    plan: standard
+    buildCommand: |
+      pip install --upgrade pip  
+      pip install -r requirements.txt
+    startCommand: python worker.py  # Si vous avez un worker séparé
+    
+    envVars:
+      - key: WORKER_MODE
+        value: true
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-cache
+          property: connectionString
+    
+    disk:
+      name: worker-storage
+      mountPath: /opt/render/project/temp
+      sizeGB: 20
+
+# Services additionnels
+  - type: redis
+    name: ai-cache
+    region: frankfurt
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+
+# Base de données (optionnel)
+  - type: pserv
+    name: ai-database
+    region: frankfurt  
+    plan: starter
+    databaseName: ai_generator
+    databaseUser: ai_user
